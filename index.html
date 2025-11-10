@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro de Asistencia</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+        .logo {
+            font-size: 60px;
+            margin-bottom: 10px;
+        }
+        h1 {
+            color: #128C7E;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .clock {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        .time {
+            font-size: 48px;
+            font-weight: bold;
+            color: #128C7E;
+            margin-bottom: 5px;
+        }
+        .date {
+            color: #666;
+            font-size: 16px;
+        }
+        .employee-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .employee-input:focus {
+            outline: none;
+            border-color: #25D366;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .btn {
+            padding: 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn-entrada {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+        .btn-salida {
+            background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+            color: white;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            font-size: 13px;
+            color: #1976d2;
+        }
+        .emoji {
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📱</div>
+        <h1>Registro de Asistencia</h1>
+        <p class="subtitle">Marca tu entrada o salida</p>
+        
+        <div class="clock">
+            <div class="time" id="currentTime"></div>
+            <div class="date" id="currentDate"></div>
+        </div>
+
+        <input 
+            type="text" 
+            id="employeeName" 
+            class="employee-input" 
+            placeholder="Escribe tu nombre"
+            autocomplete="name"
+        >
+
+        <div class="buttons">
+            <button class="btn btn-entrada" onclick="marcarEntrada()">
+                <span class="emoji">✅</span>
+                Marcar ENTRADA
+            </button>
+            <button class="btn btn-salida" onclick="marcarSalida()">
+                <span class="emoji">🚪</span>
+                Marcar SALIDA
+            </button>
+        </div>
+
+        <div class="info">
+            💡 Se enviará un mensaje automático por WhatsApp
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ IMPORTANTE: Cambia este número por el tuyo
+        const NUMERO_ADMIN = '525515119949'; // Tu número con código de país (sin +)
+        
+        function actualizarReloj() {
+            const now = new Date();
+            
+            const horas = now.getHours().toString().padStart(2, '0');
+            const minutos = now.getMinutes().toString().padStart(2, '0');
+            const segundos = now.getSeconds().toString().padStart(2, '0');
+            
+            document.getElementById('currentTime').textContent = 
+                `${horas}:${minutos}:${segundos}`;
+            
+            const opciones = { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            };
+            document.getElementById('currentDate').textContent = 
+                now.toLocaleDateString('es-ES', opciones);
+        }
+
+        setInterval(actualizarReloj, 1000);
+        actualizarReloj();
+
+        function obtenerUbicacion() {
+            return new Promise((resolve) => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const lat = position.coords.latitude.toFixed(6);
+                            const lon = position.coords.longitude.toFixed(6);
+                            resolve(`📍 Ubicación: https://maps.google.com/?q=${lat},${lon}`);
+                        },
+                        () => resolve('')
+                    );
+                } else {
+                    resolve('');
+                }
+            });
+        }
+
+        async function marcarEntrada() {
+            const nombre = document.getElementById('employeeName').value.trim();
+            
+            if (!nombre) {
+                alert('⚠️ Por favor escribe tu nombre');
+                return;
+            }
+
+            const now = new Date();
+            const fecha = now.toLocaleDateString('es-ES');
+            const hora = now.toLocaleTimeString('es-ES');
+            
+            const ubicacion = await obtenerUbicacion();
+
+            const mensaje = `
+🟢 *ENTRADA REGISTRADA*
+
+👤 *Empleado:* ${nombre}
+📅 *Fecha:* ${fecha}
+🕐 *Hora:* ${hora}
+${ubicacion}
+
+_Mensaje automático del sistema de asistencia_
+            `.trim();
+
+            const url = `https://wa.me/${NUMERO_ADMIN}?text=${encodeURIComponent(mensaje)}`;
+            window.open(url, '_blank');
+            
+            // Vibración de confirmación (si el dispositivo lo soporta)
+            if (navigator.vibrate) {
+                navigator.vibrate(200);
+            }
+        }
+
+        async function marcarSalida() {
+            const nombre = document.getElementById('employeeName').value.trim();
+            
+            if (!nombre) {
+                alert('⚠️ Por favor escribe tu nombre');
+                return;
+            }
+
+            const now = new Date();
+            const fecha = now.toLocaleDateString('es-ES');
+            const hora = now.toLocaleTimeString('es-ES');
+            
+            const ubicacion = await obtenerUbicacion();
+
+            const mensaje = `
+🔴 *SALIDA REGISTRADA*
+
+👤 *Empleado:* ${nombre}
+📅 *Fecha:* ${fecha}
+🕐 *Hora:* ${hora}
+${ubicacion}
+
+_Mensaje automático del sistema de asistencia_
+            `.trim();
+
+            const url = `https://wa.me/${NUMERO_ADMIN}?text=${encodeURIComponent(mensaje)}`;
+            window.open(url, '_blank');
+            
+            if (navigator.vibrate) {
+                navigator.vibrate(200);
+            }
+        }
+
+        // Guardar nombre en localStorage
+        const employeeInput = document.getElementById('employeeName');
+        
+        // Cargar nombre guardado
+        const nombreGuardado = localStorage.getItem('nombreEmpleado');
+        if (nombreGuardado) {
+            employeeInput.value = nombreGuardado;
+        }
+
+        // Guardar cuando cambia
+        employeeInput.addEventListener('change', function() {
+            localStorage.setItem('nombreEmpleado', this.value);
+        });
+    </script>
+</body>
+</html>
