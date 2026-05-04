@@ -668,7 +668,7 @@ const EMPLEADOS = {
 
 const HORARIO = {
     semana: { entrada:{h:10,m:0}, salida:{h:19,m:0}, comida:60, dias:[1,2,3,4,5] },
-    sabado: { entrada:{h:9,m:0},  salida:{h:15,m:0}, comida:0,  dias:[6] },
+    sabado: { entrada:{h:9,m:0},  salida:{h:15,m:0}, comida:0,  dias:[6,0] },
 };
 const TOL_PUNTUAL = 8;   // minutos de tolerancia
 const MIN_EXTRA   = 20;  // minutos después de salida para contar horas extra
@@ -692,7 +692,7 @@ function getLunes(offset=0) {
 
 function actualizarLabel() {
     const l = getLunes(offsetSemana);
-    const s = new Date(l); s.setDate(l.getDate()+5);
+    const s = new Date(l); s.setDate(l.getDate()+6);
     const opts = {day:'numeric',month:'short'};
     document.getElementById('weekLabel').textContent =
         `${l.toLocaleDateString('es-MX',opts)} – ${s.toLocaleDateString('es-MX',opts)} ${l.getFullYear()}`.toUpperCase();
@@ -746,7 +746,7 @@ function procesarEmpleado(nombre, regs) {
 
     const lunes = getLunes(offsetSemana);
     const diasSemana = [];
-    for (let i=0; i<=5; i++) {
+    for (let i=0; i<=6; i++) {
         const d = new Date(lunes); d.setDate(lunes.getDate()+i); diasSemana.push(d);
     }
 
@@ -876,7 +876,7 @@ function toggleEmp(card) { card.classList.toggle('open'); }
 function renderReporte(regs) {
     const semana = (() => {
         const l = getLunes(offsetSemana);
-        const s = new Date(l); s.setDate(l.getDate()+5); s.setHours(23,59,59,999);
+        const s = new Date(l); s.setDate(l.getDate()+6); s.setHours(23,59,59,999);
         return regs.filter(r => {
             const dt = parseDT(r.fecha, r.hora);
             return dt>=l && dt<=s;
@@ -958,15 +958,15 @@ function cargarDemo() {
     const fmtF = d => `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()}`;
 
     const emps = [
-        {n:'Manuel Pineda', ent:['09:58:12','10:02:33','10:07:55','10:15:22','09:59:01','09:55:44'], sal:['19:35:00','19:00:22','19:21:30','19:00:00','19:45:10','15:10:00']},
-        {n:'Carlos Sierra',  ent:['10:05:00','10:03:20','10:09:50','10:00:01','10:11:30','09:58:00'], sal:['19:10:00','19:00:00','19:05:00','18:55:00','19:20:00','15:00:00']},
-        {n:'Brandon Soto',   ent:['10:08:22','10:20:00','10:01:11','10:07:00','10:30:00','09:59:00'], sal:['19:00:00','19:00:00','19:00:00','19:40:00','19:00:00','15:00:00']},
-        {n:'Benjamin',       ent:['10:04:00','10:06:00','10:00:00','10:02:00','10:08:00','09:57:00'], sal:['19:00:00','19:00:00','19:25:00','19:00:00','19:00:00','14:55:00']},
+        {n:'Manuel Pineda', ent:['09:58:12','10:02:33','10:07:55','10:15:22','09:59:01','09:55:44','09:50:00'], sal:['19:35:00','19:00:22','19:21:30','19:00:00','19:45:10','15:10:00','15:00:00']},
+        {n:'Carlos Sierra',  ent:['10:05:00','10:03:20','10:09:50','10:00:01','10:11:30','09:58:00','09:55:00'], sal:['19:10:00','19:00:00','19:05:00','18:55:00','19:20:00','15:00:00','15:00:00']},
+        {n:'Brandon Soto',   ent:['10:08:22','10:20:00','10:01:11','10:07:00','10:30:00','09:59:00','09:58:00'], sal:['19:00:00','19:00:00','19:00:00','19:40:00','19:00:00','15:00:00','15:00:00']},
+        {n:'Benjamin',       ent:['10:04:00','10:06:00','10:00:00','10:02:00','10:08:00','09:57:00','09:57:00'], sal:['19:00:00','19:00:00','19:25:00','19:00:00','19:00:00','14:55:00','15:00:00']},
     ];
 
     const demo = [];
     emps.forEach(emp => {
-        for (let i=0; i<=5; i++) {
+        for (let i=0; i<=6; i++) {
             const dia = new Date(h); dia.setDate(h.getDate()+diffL+i);
             if (dia > h) continue;
             const fecha = fmtF(dia);
