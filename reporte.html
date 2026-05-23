@@ -508,11 +508,16 @@ function procesarEmpleado(nombre, regs) {
         diasReg++;
         const entReg = datoDia.entradas.sort((a,b)=>a.hora.localeCompare(b.hora))[0];
         const salReg = datoDia.salidas.length ? datoDia.salidas.sort((a,b)=>b.hora.localeCompare(a.hora))[0] : null;
-        const entDt  = parseDT(entReg.fecha, entReg.hora);
+        let entDt  = parseDT(entReg.fecha, entReg.hora);
 
         const limPunt = new Date(dia); limPunt.setHours(hor.entrada.h, hor.entrada.m+TOL_PUNTUAL, 0, 0);
         const puntual = entDt <= limPunt;
-        if (puntual) diasPunt++;
+        if (puntual) {
+            // Redondear entrada a hora oficial para no generar horas extra incorrectas
+            entDt = new Date(dia);
+            entDt.setHours(hor.entrada.h, hor.entrada.m, 0, 0);
+            diasPunt++;
+        }
 
         let mins=0, extra=0, estado='sin-salida';
         if (salReg) {
@@ -542,9 +547,12 @@ function procesarEmpleado(nombre, regs) {
         extraDetalle = { horasExtra, e1, e2, porHora: cfg.porHora, pago1, pago2, total: pagoExtra };
     }
 
-    const pagoBase = diasReg > 0 ? cfg.semanal * (diasReg/diasLab) : 0;
+    const pagoBase = diasReg > 0 ? cfg.semanal : 0;
     const tieneBono = diasReg >= DIAS_BONO && diasPunt >= DIAS_BONO;
-    const bonoPag   = tieneBono ? BONO : 0;
+    // Bono override por nombre (localStorage)
+    const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
+    const bonoValor = bonoOverrides[nombre] !== undefined ? bonoOverrides[nombre] : BONO;
+    const bonoPag   = tieneBono ? bonoValor : 0;
     const totalPago = pagoBase + pagoExtra + bonoPag;
 
     return { nombre, cfg, detalles, horasTrab, horasExtra, diasReg, diasLab, diasPunt, pagoBase, pagoExtra, bonoPag, totalPago, tieneBono, extraDetalle };
@@ -586,23 +594,33 @@ function renderExtraDetalle(ed) {
     return `<div class="extra-detail-box">${lineas}</div>`;
 }
 
-function renderSalaryEdit(nombre, cfg) {
+function renderSalaryEdit(nombre, cfg, bonoValor) {
     const overrides = JSON.parse(localStorage.getItem('tlacuilosSalarios') || '{}');
+    const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
     const esModificado = overrides[nombre] !== undefined;
     const esEscalado = cfg.escalado;
     let nota = '';
     if (esEscalado) nota = `<span class="salary-note">⚡ Salario escalonado — actualmente en tarifa ${getSalarioJulieta()===3500?'1 ($3,500)':'2 ($4,500)'}</span>`;
     if (esModificado) nota += `<span class="salary-note" style="margin-left:12px;color:var(--naranja);">✎ Modificado</span>`;
 
-    return `<div class="salary-edit-box">
+    const nomId = nombre.replace(/\s/g,'_');
+    return `<div class="salary-edit-box" style="flex-wrap:wrap;gap:10px;">
         <label>💰 Salario semanal actual:</label>
         <span class="salary-info">${fmtP(cfg.semanal)}</span>
         <span style="color:var(--gris);font-size:11px;font-family:'Barlow Condensed',sans-serif;">→</span>
-        <label>Nuevo valor ($):</label>
-        <input type="number" id="sal_${nombre.replace(/\s/g,'_')}" min="0" step="100" placeholder="${cfg.semanal}">
-        <button class="btn-save-salary" onclick="guardarSalario('${nombre}', parseFloat(document.getElementById('sal_${nombre.replace(/\s/g,'_')}').value || ${cfg.semanal}))">GUARDAR</button>
+        <label>Nuevo salario ($):</label>
+        <input type="number" id="sal_${nomId}" min="0" step="100" placeholder="${cfg.semanal}">
+        <button class="btn-save-salary" onclick="guardarSalario('${nombre}', parseFloat(document.getElementById('sal_${nomId}').value || ${cfg.semanal}))">GUARDAR</button>
         <button class="btn-save-salary" style="background:var(--rojo);font-size:12px;" onclick="resetSalario('${nombre}')">RESTAURAR</button>
         ${nota}
+        <span style="color:var(--gris);font-size:11px;font-family:'Barlow Condensed',sans-serif;width:100%;margin-top:4px;">│</span>
+        <label>🏅 Bono actual:</label>
+        <span class="salary-info">${fmtP(bonoValor)}</span>
+        <span style="color:var(--gris);font-size:11px;font-family:'Barlow Condensed',sans-serif;">→</span>
+        <label>Nuevo bono ($):</label>
+        <input type="number" id="bon_${nomId}" min="0" step="100" placeholder="${bonoValor}">
+        <button class="btn-save-salary" onclick="guardarBono('${nombre}', parseFloat(document.getElementById('bon_${nomId}').value || ${bonoValor}))">GUARDAR</button>
+        <button class="btn-save-salary" style="background:var(--rojo);font-size:12px;" onclick="resetBono('${nombre}')">RESTAURAR</button>
     </div>`;
 }
 
@@ -613,8 +631,116 @@ function resetSalario(nombre) {
     renderReporte(registrosGlobales);
 }
 
+function guardarBono(nombre, nuevoBono) {
+    const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
+    bonoOverrides[nombre] = nuevoBono;
+    localStorage.setItem('tlacuilosBonos', JSON.stringify(bonoOverrides));
+    renderReporte(registrosGlobales);
+}
+
+function resetBono(nombre) {
+    const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
+    delete bonoOverrides[nombre];
+    localStorage.setItem('tlacuilosBonos', JSON.stringify(bonoOverrides));
+    renderReporte(registrosGlobales);
+}
+
+function printReceipt(d) {
+    const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
+    const lunes = getLunes(offsetSemana);
+    const dom   = new Date(lunes); dom.setDate(lunes.getDate()+6);
+    const fmtFecha = dt => dt.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+    const periodoStr = `${fmtFecha(lunes)} – ${fmtFecha(dom)}`;
+
+    let rowsHtml = '';
+    detalles.forEach(r => {
+        const diaNom = `${DN[r.dow]} ${r.dia.getDate()}`;
+        if (r.estado==='ausente') {
+            const futuro = r.dia > new Date() && r.dia.toDateString() !== new Date().toDateString();
+            rowsHtml += `<tr><td>${diaNom}</td><td>–</td><td>–</td><td>–</td><td>–</td><td style="color:#999">${futuro?'Pendiente':'Ausente'}</td></tr>`;
+        } else if (r.estado==='sin-salida') {
+            rowsHtml += `<tr><td>${diaNom}</td><td>${r.entrada}</td><td style="color:#c90">Sin registro</td><td>–</td><td>–</td><td style="color:${r.puntual?'#2a9d60':'#c90'}">${r.puntual?'Puntual':'Tarde'}</td></tr>`;
+        } else {
+            rowsHtml += `<tr><td>${diaNom}</td><td>${r.entrada}</td><td>${r.salida}</td><td>${fmtH(r.mins/60)}</td><td style="color:${r.extra>0?'#F5A623':'#999'}">${r.extra>0?fmtH(r.extra/60):'–'}</td><td style="color:${r.puntual?'#2a9d60':'#c90'}">${r.puntual?'Puntual':'Tarde'}</td></tr>`;
+        }
+    });
+
+    let extraHtml = '';
+    if (extraDetalle) {
+        const ed = extraDetalle;
+        extraHtml = `<div style="margin-top:12px;padding:10px;border:1px solid #F5A623;background:#fffbf0;">
+            <b style="color:#F5A623;font-size:11px;text-transform:uppercase;letter-spacing:.1em;">📊 Horas Extra (LFT)</b><br>
+            <span style="font-size:12px;">Total: ${fmtH(ed.horasExtra)} (${fmtN(ed.horasExtra,2)} h) &nbsp;·&nbsp; Cuota/hora: ${fmtP(ed.porHora)}<br>
+            ${ed.e1>0?`Primeras 9h (×2): ${fmtN(ed.e1,2)} h × ${fmtP(ed.porHora)} × 2 = <b>${fmtP(ed.pago1)}</b><br>`:''}
+            ${ed.e2>0?`Adicionales (×3): ${fmtN(ed.e2,2)} h × ${fmtP(ed.porHora)} × 3 = <b>${fmtP(ed.pago2)}</b><br>`:''}
+            <b>Total extra: ${fmtP(ed.total)}</b></span>
+        </div>`;
+    }
+
+    const recibo = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <title>Recibo – ${nombre}</title>
+    <style>
+        body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:24px;color:#222;font-size:13px;}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #F5A623;padding-bottom:12px;margin-bottom:18px;}
+        .titulo{font-size:22px;font-weight:900;letter-spacing:.05em;color:#111;}
+        .sub{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.1em;margin-top:2px;}
+        .nombre{font-size:18px;font-weight:700;margin-bottom:4px;}
+        .periodo{font-size:12px;color:#555;}
+        table{width:100%;border-collapse:collapse;margin-top:12px;}
+        th{background:#f0f0f0;padding:7px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#555;border-bottom:2px solid #ddd;}
+        td{padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;}
+        .totales{margin-top:16px;border-top:2px solid #222;padding-top:12px;display:flex;gap:20px;flex-wrap:wrap;}
+        .tot-item{flex:1;min-width:120px;}
+        .tot-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#666;}
+        .tot-val{font-size:18px;font-weight:700;margin-top:2px;}
+        .tot-val.verde{color:#2a9d60;}
+        .tot-val.naranja{color:#F5A623;}
+        .tot-val.total{font-size:24px;color:#2B2BA0;}
+        .firma{margin-top:40px;display:flex;justify-content:space-between;}
+        .firma-box{width:200px;border-top:1px solid #888;padding-top:6px;font-size:11px;color:#666;text-align:center;}
+        @media print{body{padding:0;} button{display:none;}}
+    </style></head><body>
+    <div class="header">
+        <div>
+            <div class="titulo">TALLER TLACUILOS</div>
+            <div class="sub">Recibo de Nómina Semanal</div>
+        </div>
+        <div style="text-align:right;">
+            <div class="nombre">${nombre}</div>
+            <div class="periodo">Período: ${periodoStr}</div>
+            <div class="periodo">Salario base semanal: ${fmtP(cfg.semanal)}</div>
+        </div>
+    </div>
+    <b style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#555;">Detalle de Asistencias</b>
+    <table>
+        <thead><tr><th>Día</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Puntualidad</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+    </table>
+    ${extraHtml}
+    <div class="totales">
+        <div class="tot-item"><div class="tot-label">Salario Base</div><div class="tot-val">${fmtP(pagoBase)}</div></div>
+        <div class="tot-item"><div class="tot-label">Horas Extra</div><div class="tot-val naranja">${fmtP(pagoExtra)}</div></div>
+        <div class="tot-item"><div class="tot-label">Bono Puntualidad</div><div class="tot-val verde">${fmtP(bonoPag)}</div></div>
+        <div class="tot-item"><div class="tot-label">▸ TOTAL A PAGAR</div><div class="tot-val total">${fmtP(totalPago)}</div></div>
+    </div>
+    <div class="firma">
+        <div class="firma-box">Firma del Empleador</div>
+        <div class="firma-box">Firma del Empleado: ${nombre}</div>
+    </div>
+    <div style="margin-top:24px;text-align:center;">
+        <button onclick="window.print()" style="padding:10px 28px;background:#2B2BA0;color:#fff;border:none;font-size:14px;cursor:pointer;border-radius:4px;">🖨 IMPRIMIR</button>
+    </div>
+    </body></html>`;
+
+    const win = window.open('','_blank');
+    win.document.write(recibo);
+    win.document.close();
+}
+
 function renderEmp(d) {
     const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
+    const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
+    const bonoValor = bonoOverrides[nombre] !== undefined ? bonoOverrides[nombre] : BONO;
     const ini = nombre.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 
     const rows = detalles.map(r => {
@@ -648,7 +774,7 @@ function renderEmp(d) {
             <span class="chevron">▼</span>
         </div>
         <div class="emp-detail" onclick="event.stopPropagation()">
-            ${renderSalaryEdit(nombre, cfg)}
+            ${renderSalaryEdit(nombre, cfg, bonoValor)}
             <table class="dias">
                 <thead><tr><th>Día</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Puntualidad</th><th>✓</th></tr></thead>
                 <tbody>${rows}</tbody>
@@ -659,6 +785,9 @@ function renderEmp(d) {
                 <div class="pago-item"><div class="pago-label">Horas Extra</div><div class="pago-val" style="color:var(--naranja)">${fmtP(pagoExtra)}</div></div>
                 <div class="pago-item"><div class="pago-label">Bono Puntualidad</div><div class="pago-val" style="color:${tieneBono?'var(--verde)':'var(--gris)'}">${fmtP(bonoPag)}</div></div>
                 <div class="pago-item"><div class="pago-label">▸ TOTAL A PAGAR</div><div class="pago-val total">${fmtP(totalPago)}</div></div>
+                <div class="pago-item" style="margin-left:auto;">
+                    <button class="btn-save-salary" style="background:var(--naranja);color:var(--negro);font-size:13px;padding:8px 18px;" onclick="printReceipt(empDataMap['${nombre}'])">🖨 IMPRIMIR RECIBO</button>
+                </div>
             </div>
         </div>
     </div>`;
@@ -702,6 +831,9 @@ function renderReporte(regs) {
 
     const grid = document.getElementById('empGrid');
     const todoAusente = resultados.every(r=>r.diasReg===0);
+    // Guardar mapa global para acceso desde printReceipt
+    window.empDataMap = {};
+    resultados.forEach(r => { window.empDataMap[r.nombre] = r; });
     if (todoAusente) {
         grid.innerHTML = `<div class="empty"><div class="ico">📭</div><h3>SIN REGISTROS ESTA SEMANA</h3><p>No hay datos de asistencia para el período seleccionado.</p><button class="btn-demo" onclick="cargarDemo()">VER DEMO</button></div>`;
     } else {
