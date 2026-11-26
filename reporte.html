@@ -415,6 +415,41 @@ const DIAS_BONO   = 5;
 // =============================================
 let offsetSemana = 0;
 let registrosGlobales = [];
+let feriadosGlobales = [];
+let vacacionesGlobales = [];
+
+// =============================================
+// FERIADOS Y VACACIONES (25 nov 2026)
+// Feriados: pestaña FERIADOS (fecha | motivo), fecha dd/mm/yyyy.
+// Vacaciones: pestaña VACACIONES (nombre | desde | hasta).
+// Reglas: el registro manda (con ENTRADA, día trabajado normal).
+// Sin ENTRADA: feriado = día cumplido para el bono (suma a diasReg
+// y diasPunt), 0 horas. Vacaciones = no es falta, el salario sí se
+// paga, pero NO suma al bono. Los días futuros no se cuentan ni se
+// muestran como falta.
+// =============================================
+function parseFecha_(s) {
+    const p = String(s || '').split('/');
+    if (p.length !== 3) return null;
+    const d = new Date(+p[2], +p[1] - 1, +p[0]);
+    return isNaN(d) ? null : d;
+}
+function esFeriado(key) {
+    return feriadosGlobales.some(f => f.fecha === key);
+}
+function motivoFeriado(key) {
+    const f = feriadosGlobales.find(f => f.fecha === key);
+    return f ? (f.motivo || '') : '';
+}
+function enVacaciones(nombre, dia) {
+    const n = String(nombre || '').trim().toLowerCase();
+    return vacacionesGlobales.some(v => {
+        if (String(v.nombre || '').trim().toLowerCase() !== n) return false;
+        const desde = parseFecha_(v.desde), hasta = parseFecha_(v.hasta);
+        if (!desde || !hasta) return false;
+        return dia >= desde && dia <= hasta;
+    });
+}
 
 function getLunes(offset=0) {
     const h = new Date(), d = h.getDay();
@@ -486,25 +521,44 @@ function procesarEmpleado(nombre, regs) {
         const d = new Date(lunes); d.setDate(lunes.getDate()+i); diasSemana.push(d);
     }
 
-    let totalMins=0, totalExtra=0, diasPunt=0, diasReg=0, diasLab=0;
+    let totalMins=0, totalExtra=0, diasPunt=0, diasReg=0, diasLab=0, diasFer=0, diasVac=0;
     const detalles = [];
 
     diasSemana.forEach(dia => {
         const dow = dia.getDay();
         const hor = horarioDia(dow);
         if (!hor) return;
-        diasLab++;
 
         const dd = dia.getDate().toString().padStart(2,'0');
         const mm = (dia.getMonth()+1).toString().padStart(2,'0');
         const key = `${dd}/${mm}/${dia.getFullYear()}`;
 
         const datoDia = porFecha[key];
+        const hoy = new Date(); hoy.setHours(0,0,0,0);
+        const esFuturo = dia > hoy;
         if (!datoDia || !datoDia.entradas.length) {
+            // Sin ENTRADA: futuro, feriado, vacaciones o falta.
+            // (Con ENTRADA el registro manda y se procesa abajo normal.)
+            if (esFuturo) {
+                detalles.push({dia, dow, key, estado:'futuro', mins:0, extra:0, puntual:false, entrada:null, salida:null});
+                return;
+            }
+            if (esFeriado(key)) {
+                diasFer++;
+                detalles.push({dia, dow, key, estado:'feriado', motivo:motivoFeriado(key), mins:0, extra:0, puntual:true, entrada:null, salida:null});
+                return;
+            }
+            if (enVacaciones(nombre, dia)) {
+                diasVac++;
+                detalles.push({dia, dow, key, estado:'vacaciones', mins:0, extra:0, puntual:false, entrada:null, salida:null});
+                return;
+            }
+            diasLab++;
             detalles.push({dia, dow, key, estado:'ausente', mins:0, extra:0, puntual:false, entrada:null, salida:null});
             return;
         }
 
+        diasLab++;
         diasReg++;
         const entReg = datoDia.entradas.sort((a,b)=>a.hora.localeCompare(b.hora))[0];
         const salReg = datoDia.salidas.length ? datoDia.salidas.sort((a,b)=>b.hora.localeCompare(a.hora))[0] : null;
@@ -547,15 +601,17 @@ function procesarEmpleado(nombre, regs) {
         extraDetalle = { horasExtra, e1, e2, porHora: cfg.porHora, pago1, pago2, total: pagoExtra };
     }
 
-    const pagoBase = diasReg > 0 ? cfg.semanal : 0;
-    const tieneBono = diasReg >= DIAS_BONO && diasPunt >= DIAS_BONO;
+    // Feriado: día cumplido para el bono (suma a diasReg y diasPunt).
+    // Vacaciones: el salario sí se paga, pero NO suman al bono.
+    const pagoBase = (diasReg > 0 || diasVac > 0) ? cfg.semanal : 0;
+    const tieneBono = (diasReg + diasFer) >= DIAS_BONO && (diasPunt + diasFer) >= DIAS_BONO;
     // Bono override por nombre (localStorage)
     const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
     const bonoValor = bonoOverrides[nombre] !== undefined ? bonoOverrides[nombre] : BONO;
     const bonoPag   = tieneBono ? bonoValor : 0;
     const totalPago = pagoBase + pagoExtra + bonoPag;
 
-    return { nombre, cfg, detalles, horasTrab, horasExtra, diasReg, diasLab, diasPunt, pagoBase, pagoExtra, bonoPag, totalPago, tieneBono, extraDetalle };
+    return { nombre, cfg, detalles, horasTrab, horasExtra, diasReg, diasLab, diasPunt, diasFer, diasVac, pagoBase, pagoExtra, bonoPag, totalPago, tieneBono, extraDetalle };
 }
 
 // =============================================
@@ -646,7 +702,7 @@ function resetBono(nombre) {
 }
 
 function printReceipt(d) {
-    const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
+    const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,diasFer=0,diasVac=0,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
     const lunes = getLunes(offsetSemana);
     const dom   = new Date(lunes); dom.setDate(lunes.getDate()+6);
     const fmtFecha = dt => dt.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
@@ -656,7 +712,13 @@ function printReceipt(d) {
     let rowsHtml = '';
     detalles.forEach((r,i) => {
         const diaNom = `${DN[r.dow]} ${r.dia.getDate()}`;
-        if (r.estado==='ausente') {
+        if (r.estado==='futuro') {
+            rowsHtml += `<tr class="row-${i%2===0?'even':'odd'}"><td class="day-cell"><span class="day-dot" style="background:#ddd"></span>${diaNom}</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:#8B8FA8;font-weight:600">Pendiente</td></tr>`;
+        } else if (r.estado==='feriado') {
+            rowsHtml += `<tr class="row-${i%2===0?'even':'odd'}"><td class="day-cell"><span class="day-dot" style="background:#27AE60"></span>${diaNom}</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:#27AE60;font-weight:600">🎉 Feriado${r.motivo?` — ${r.motivo}`:''}</td></tr>`;
+        } else if (r.estado==='vacaciones') {
+            rowsHtml += `<tr class="row-${i%2===0?'even':'odd'}"><td class="day-cell"><span class="day-dot" style="background:#27AE60"></span>${diaNom}</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:#27AE60;font-weight:600">🌴 Vacaciones</td></tr>`;
+        } else if (r.estado==='ausente') {
             const futuro = r.dia > new Date() && r.dia.toDateString() !== new Date().toDateString();
             const label = futuro ? 'Pendiente' : 'Ausente';
             const color = futuro ? '#8B8FA8' : '#C0392B';
@@ -838,13 +900,23 @@ function printReceipt(d) {
 }
 
 function renderEmp(d) {
-    const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
+    const {nombre,cfg,detalles,horasTrab,horasExtra,diasReg,diasLab,diasPunt,diasFer=0,diasVac=0,pagoBase,pagoExtra,bonoPag,totalPago,tieneBono,extraDetalle} = d;
+    const excTxt = [diasFer>0?`🎉 ${diasFer} fer.`:'', diasVac>0?`🌴 ${diasVac} vac.`:''].filter(Boolean).join(' · ');
     const bonoOverrides = JSON.parse(localStorage.getItem('tlacuilosBonos') || '{}');
     const bonoValor = bonoOverrides[nombre] !== undefined ? bonoOverrides[nombre] : BONO;
     const ini = nombre.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 
     const rows = detalles.map(r => {
         const diaNom = `${DN[r.dow]} ${r.dia.getDate()}`;
+        if (r.estado==='futuro') {
+            return `<tr><td>${diaNom}</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">Pendiente</td><td class="dim">–</td></tr>`;
+        }
+        if (r.estado==='feriado') {
+            return `<tr><td>${diaNom}</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="ok">🎉 Feriado${r.motivo?` — ${r.motivo}`:''}</td><td class="ok">✓</td></tr>`;
+        }
+        if (r.estado==='vacaciones') {
+            return `<tr><td>${diaNom}</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="ok">🌴 Vacaciones</td><td class="ok">✓</td></tr>`;
+        }
         if (r.estado==='ausente') {
             const futuro = r.dia > new Date() && r.dia.toDateString() !== new Date().toDateString();
             if (futuro) return `<tr><td>${diaNom}</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">–</td><td class="dim">Pendiente</td><td class="dim">–</td></tr>`;
@@ -863,7 +935,7 @@ function renderEmp(d) {
                 <div class="emp-avatar" style="background:${cfg.color}22;color:${cfg.color};border:2px solid ${cfg.color}55;">${ini}</div>
                 <div>
                     <div class="emp-name">${nombre}</div>
-                    <div class="emp-meta">${diasReg}/${diasLab} días &nbsp;·&nbsp; <span class="bono-badge ${tieneBono?'bono-si':'bono-no'}">${tieneBono?'✓ BONO':'✗ SIN BONO'}</span></div>
+                    <div class="emp-meta">${diasReg}/${diasLab} días${excTxt?` &nbsp;·&nbsp; ${excTxt}`:''} &nbsp;·&nbsp; <span class="bono-badge ${tieneBono?'bono-si':'bono-no'}">${tieneBono?'✓ BONO':'✗ SIN BONO'}</span></div>
                 </div>
             </div>
             <div class="emp-stats">
@@ -930,7 +1002,7 @@ function renderReporte(regs) {
     document.getElementById('s-activos').textContent   = activos;
 
     const grid = document.getElementById('empGrid');
-    const todoAusente = resultados.every(r=>r.diasReg===0);
+    const todoAusente = resultados.every(r=>r.diasReg===0 && (r.diasVac||0)===0);
     // Guardar mapa global para acceso desde printReceipt
     window.empDataMap = {};
     resultados.forEach(r => { window.empDataMap[r.nombre] = r; });
@@ -950,9 +1022,15 @@ async function cargarDatos() {
 
     document.getElementById('loading').classList.add('show');
     try {
-        const r = await fetch(`${url}?action=getAll`, {cache:'no-store'});
-        const d = await r.json();
-        if (d.registros) { registrosGlobales = d.registros; renderReporte(registrosGlobales); }
+        const [d, df, dv] = await Promise.all([
+            fetch(`${url}?action=getAll`, {cache:'no-store'}).then(r=>r.json()).catch(()=>null),
+            fetch(`${url}?action=feriados`, {cache:'no-store'}).then(r=>r.json()).catch(()=>null),
+            fetch(`${url}?action=vacaciones`, {cache:'no-store'}).then(r=>r.json()).catch(()=>null),
+        ]);
+        if (d && d.registros) { registrosGlobales = d.registros; }
+        feriadosGlobales = (df && df.feriados) || [];
+        vacacionesGlobales = (dv && dv.vacaciones) || [];
+        renderReporte(registrosGlobales);
     } catch(e) {
         alert('⚠️ No se pudo conectar con Google Sheets. Verifica la URL.');
     } finally {
