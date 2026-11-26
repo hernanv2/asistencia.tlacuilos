@@ -300,6 +300,27 @@
 <div class="toast" id="toast"></div>
 
 <script>
+    // ============================================================
+    // Portal de asistencia — Taller Tlacuilos (MEJORADO 25 nov 2026)
+    // Cambios:
+    //  1. GPS en alta precisión y se manda la precisión (accuracy, en
+    //     metros) junto con lat/lng. El servidor la guarda y marca
+    //     EN EL TALLER / FUERA DEL TALLER / SIN UBICACIÓN.
+    //  2. El WhatsApp ya NO se abre a ciegas: después del POST se pide
+    //     por JSONP el último registro (?action=ultimo) y solo si el
+    //     servidor confirma (folio nuevo, de hoy, hace menos de 3 min)
+    //     se abre el WhatsApp con el folio. Si no se confirma, avisa
+    //     y NO abre el WhatsApp: hay que revisar el reporte.
+    //  3. El mensaje lleva el folio y la fecha/hora DEL SERVIDOR
+    //     (no del teléfono). La ubicación del mensaje se puede seguir
+    //     editando; la prueba es el folio, no el texto.
+    //  4. PIN opcional: si existe un campo #pinInput en la página, su
+    //     valor se manda como "pin" y el servidor lo valida. Hoy no
+    //     existe ese campo (los PINs aún no están cargados) y no pasa
+    //     nada. Para prender el PIN: agregar el campo al HTML y cargar
+    //     los PINs en la pestaña PINES del Sheet.
+    // ============================================================
+
     const NUMERO_ADMIN  = '525515119949';
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxntIk9VDpUVv2T0WlLMJcXvaf0QmdLdTBoxAfXi_a_znnT1OyVMut65ifX2TExjBZO/exec';
 
@@ -328,13 +349,40 @@
         setTimeout(()=> t.classList.remove('show'), 3500);
     }
 
+    // GPS en alta precisión. Devuelve {lat, lon, accuracy} o null.
+    // accuracy viene en metros: mientras más chico, más confiable.
     function getGPS() {
         return new Promise(resolve => {
             if (!navigator.geolocation) return resolve(null);
             navigator.geolocation.getCurrentPosition(
-                p => resolve({ lat: p.coords.latitude.toFixed(6), lon: p.coords.longitude.toFixed(6) }),
-                () => resolve(null), { timeout: 8000 }
+                p => resolve({ lat: p.coords.latitude.toFixed(6), lon: p.coords.longitude.toFixed(6), accuracy: Math.round(p.coords.accuracy) }),
+                () => resolve(null),
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
+        });
+    }
+
+    // Pide por JSONP el último registro guardado de ese trabajador.
+    // Apps Script no devuelve Access-Control-Allow-Origin, por eso el
+    // POST va a ciegas (mode:'no-cors') y la confirmación llega por aquí.
+    // Resuelve con la respuesta del servidor o con null si no llegó a tiempo.
+    function pedirUltimo(nombre, timeoutMs) {
+        return new Promise(resolve => {
+            const cb = '__tlacuilosFolioCb_' + Date.now();
+            let s = null;
+            let listo = false;
+            const limpiar = () => {
+                if (listo) return; listo = true;
+                try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+                if (s && s.parentNode) s.parentNode.removeChild(s);
+            };
+            const timer = setTimeout(() => { limpiar(); resolve(null); }, timeoutMs);
+            window[cb] = (res) => { clearTimeout(timer); limpiar(); resolve(res); };
+            s = document.createElement('script');
+            s.src = APPS_SCRIPT_URL + '?action=ultimo&nombre=' + encodeURIComponent(nombre)
+                + '&callback=' + cb + '&_=' + Date.now();
+            s.onerror = () => { clearTimeout(timer); limpiar(); resolve(null); };
+            document.body.appendChild(s);
         });
     }
 
@@ -342,8 +390,10 @@
         const nombre = sel.value.trim();
         if (!nombre) { showToast('⚠️ Selecciona tu nombre'); return; }
 
-        document.getElementById('btnEntrada').disabled = true;
-        document.getElementById('btnSalida').disabled = true;
+        const btnE = document.getElementById('btnEntrada');
+        const btnS = document.getElementById('btnSalida');
+        btnE.disabled = true;
+        btnS.disabled = true;
         setStatus('Obteniendo ubicación GPS...', 'loading');
 
         const now = new Date(), gps = await getGPS();
@@ -352,31 +402,75 @@
         const fecha = `${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
         const hora  = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
+        // PIN opcional: solo se manda si existe el campo #pinInput en la página.
+        const pinEl = document.getElementById('pinInput');
+        const pin = pinEl ? pinEl.value.trim() : '';
+
         setStatus('Guardando registro...', 'loading');
-        let guardado = false;
-        if (APPS_SCRIPT_URL !== 'TU_URL_INVALIDA') {
-            try {
-                await fetch(APPS_SCRIPT_URL, {
-                    method:'POST', mode:'no-cors',
-                    headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ nombre, tipo, fecha, hora, timestamp: now.toISOString(), mapsUrl })
-                });
-                guardado = true;
-            } catch(e){ console.warn(e); }
+        try {
+            await fetch(APPS_SCRIPT_URL, {
+                method:'POST', mode:'no-cors',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ nombre, tipo, fecha, hora, timestamp: now.toISOString(), mapsUrl,
+                    lat: gps ? gps.lat : '', lng: gps ? gps.lon : '',
+                    accuracy: gps ? gps.accuracy : '', pin })
+            });
+        } catch(e){ console.warn(e); }
+
+        // Confirmar con el servidor antes de abrir WhatsApp
+        setStatus('Confirmando registro...', 'loading');
+        const res = await pedirUltimo(nombre, 6000);
+        const ultimo = res && res.ok ? res.ultimo : null;
+
+        // El registro es nuestro si es del mismo tipo, trae folio, es de
+        // hoy y su hora (del servidor) está a menos de 3 min de ahora.
+        // Si el POST falló, "ultimo" sería un registro viejo y no pasa
+        // este filtro. Se tolera 1 min de reloj del teléfono atrasado.
+        // Nota: si se toca ENTRADA dos veces seguidas, la segunda se
+        // rechaza como duplicado y aquí se confirma la primera (mismo
+        // folio): el registro existe, solo no se guardó dos veces.
+        let esNuestro = false;
+        if (ultimo && ultimo.tipo === tipo && ultimo.folio && ultimo.fecha === fecha) {
+            const partes = String(ultimo.hora || '').split(':');
+            if (partes.length === 3) {
+                const tUlt = new Date(now);
+                tUlt.setHours(+partes[0], +partes[1], +partes[2], 0);
+                const diff = now - tUlt;
+                if (diff >= -60000 && diff <= 180000) esNuestro = true;
+            }
         }
 
+        if (!esNuestro) {
+            setStatus('⚠️ No se pudo confirmar el registro', '');
+            showToast('No se confirmó el guardado. Revisa el reporte antes de volver a intentar.');
+            btnE.disabled = false;
+            btnS.disabled = false;
+            return;
+        }
+
+        const folio = ultimo.folio;
+        const enTaller = ultimo.enTaller || '';
         const emoji = tipo==='ENTRADA'?'🟢':'🔴';
         const ubicTxt = mapsUrl ? `📍 Ubicación: ${mapsUrl}` : '';
-        const msg = `${emoji} *${tipo} REGISTRADA*\n\n👤 *Empleado:* ${nombre}\n📅 *Fecha:* ${fecha}\n🕐 *Hora:* ${hora}\n${ubicTxt}\n\n_Mensaje automático del sistema de asistencia_`.trim();
+        const msg = `${emoji} *${tipo} REGISTRADA*
+
+👤 *Empleado:* ${nombre}
+📅 *Fecha:* ${ultimo.fecha}
+🕐 *Hora:* ${ultimo.hora}
+🧾 *Folio:* ${folio}${enTaller ? `
+🏭 *${enTaller}*` : ''}
+${ubicTxt}
+
+_Mensaje automático del sistema de asistencia_`.trim();
         window.open(`https://wa.me/${NUMERO_ADMIN}?text=${encodeURIComponent(msg)}`, '_blank');
 
-        setStatus(`${tipo==='ENTRADA'?'✅':'🚪'} ${tipo} registrada`, '');
+        setStatus(`${tipo==='ENTRADA'?'✅':'🚪'} ${tipo} registrada — Folio ${folio}`, '');
         if (navigator.vibrate) navigator.vibrate(tipo==='ENTRADA'?[80,40,80]:[180]);
-        showToast(guardado ? '✅ Registro guardado correctamente' : '📱 Confirma el envío en WhatsApp');
+        showToast('✅ Registro guardado — Folio ' + folio);
 
         setTimeout(()=>{
-            document.getElementById('btnEntrada').disabled = false;
-            document.getElementById('btnSalida').disabled = false;
+            btnE.disabled = false;
+            btnS.disabled = false;
         }, 3000);
     }
 </script>
