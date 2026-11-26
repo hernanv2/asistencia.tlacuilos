@@ -153,6 +153,21 @@
 
         select:focus { outline:none; border-color:var(--naranja); box-shadow:3px 3px 0 var(--naranja-dark); }
 
+        input#pinInput {
+            width: 100%;
+            padding: 12px 14px;
+            background: white;
+            border: 2.5px solid var(--azul);
+            font-family: 'Barlow Condensed', sans-serif;
+            font-size: 20px; font-weight: 700;
+            color: var(--negro);
+            margin-bottom: 20px;
+            letter-spacing: 0.4em;
+            text-align: center;
+        }
+
+        input#pinInput:focus { outline:none; border-color:var(--naranja); box-shadow:3px 3px 0 var(--naranja-dark); }
+
         .buttons {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -273,8 +288,10 @@
             <option value="Brandon Soto">Brandon Soto</option>
             <option value="Benjamín Álvarez">Benjamín Álvarez</option>
             <option value="Hernán Vázquez">Hernán Vázquez</option>
-            <option value="Julieta Torres">Julieta Torres</option>
         </select>
+
+        <div class="field-label">▸ PIN (4 dígitos)</div>
+        <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="••••" autocomplete="off">
 
         <div class="buttons">
             <button class="btn btn-entrada" onclick="registrar('ENTRADA')" id="btnEntrada">
@@ -389,6 +406,9 @@
     async function registrar(tipo) {
         const nombre = sel.value.trim();
         if (!nombre) { showToast('⚠️ Selecciona tu nombre'); return; }
+        const pinEl = document.getElementById('pinInput');
+        const pin = pinEl ? pinEl.value.trim() : '';
+        if (!/^\d{4}$/.test(pin)) { showToast('⚠️ Escribe tu PIN de 4 dígitos'); return; }
 
         const btnE = document.getElementById('btnEntrada');
         const btnS = document.getElementById('btnSalida');
@@ -401,10 +421,6 @@
         const pad = x => x.toString().padStart(2,'0');
         const fecha = `${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
         const hora  = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-
-        // PIN opcional: solo se manda si existe el campo #pinInput en la página.
-        const pinEl = document.getElementById('pinInput');
-        const pin = pinEl ? pinEl.value.trim() : '';
 
         setStatus('Guardando registro...', 'loading');
         try {
